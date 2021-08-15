@@ -40,7 +40,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/mergepatch"
-	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -655,35 +654,19 @@ func (o *EditOptions) visitToPatch(originalInfos []*resource.Info, patchVisitor 
 
 		// Create the versioned struct from the type defined in the mapping
 		// (which is the API version we'll be submitting the patch to)
-		versionedObject, err := scheme.Scheme.New(info.Mapping.GroupVersionKind)
 		var patchType types.PatchType
 		var patch []byte
-		switch {
-		case runtime.IsNotRegisteredError(err):
-			// fall back to generic JSON merge patch
-			patchType = types.MergePatchType
-			patch, err = jsonpatch.CreateMergePatch(originalJS, editedJS)
-			if err != nil {
-				klog.V(4).Infof("Unable to calculate diff, no merge is possible: %v", err)
-				return err
-			}
-			for _, precondition := range preconditions {
-				if !precondition(patch) {
-					klog.V(4).Infof("Unable to calculate diff, no merge is possible: %v", err)
-					return fmt.Errorf("%s", "At least one of apiVersion, kind and name was changed")
-				}
-			}
-		case err != nil:
+		// always use generic JSON merge patch for Clusternet
+		patchType = types.MergePatchType
+		patch, err = jsonpatch.CreateMergePatch(originalJS, editedJS)
+		if err != nil {
+			klog.V(4).Infof("Unable to calculate diff, no merge is possible: %v", err)
 			return err
-		default:
-			patchType = types.StrategicMergePatchType
-			patch, err = strategicpatch.CreateTwoWayMergePatch(originalJS, editedJS, versionedObject, preconditions...)
-			if err != nil {
+		}
+		for _, precondition := range preconditions {
+			if !precondition(patch) {
 				klog.V(4).Infof("Unable to calculate diff, no merge is possible: %v", err)
-				if mergepatch.IsPreconditionFailed(err) {
-					return fmt.Errorf("%s", "At least one of apiVersion, kind and name was changed")
-				}
-				return err
+				return fmt.Errorf("%s", "At least one of apiVersion, kind and name was changed")
 			}
 		}
 
